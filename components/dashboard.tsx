@@ -22,6 +22,7 @@ type SafeConfiguration = {
   keywords: string[];
   apiVersion: string | null;
   webhookReady: boolean;
+  automationProcessingReady: boolean;
   credentialsConfigured: boolean;
   replyConfigured: boolean;
   dashboardProtected: boolean;
@@ -197,7 +198,7 @@ function SystemPanel({ config }: { config: SafeConfiguration }) {
   const checks = [
     {
       label: "Webhook verification",
-      detail: config.webhookReady ? "Challenge and signature ready" : "Variables incomplete",
+      detail: config.webhookReady ? "Verify token configured" : "Verify token missing",
       ok: config.webhookReady,
       icon: Webhook,
     },

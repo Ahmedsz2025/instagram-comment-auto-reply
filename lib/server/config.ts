@@ -4,9 +4,12 @@ import { z } from "zod";
 
 import { parseKeywords } from "@/lib/matching";
 
-const webhookConfigSchema = z.object({
+const webhookVerificationConfigSchema = z.object({
+  META_WEBHOOK_VERIFY_TOKEN: z.string().min(1),
+});
+
+const webhookProcessingConfigSchema = z.object({
   META_APP_SECRET: z.string().min(1),
-  META_WEBHOOK_VERIFY_TOKEN: z.string().min(16),
   META_INSTAGRAM_ACCESS_TOKEN: z.string().min(1),
   META_INSTAGRAM_ACCOUNT_ID: z.string().min(1),
   META_GRAPH_API_VERSION: z.string().regex(/^v\d+\.\d+$/),
@@ -14,9 +17,12 @@ const webhookConfigSchema = z.object({
   INSTAGRAM_PRIVATE_REPLY_TEXT: z.string().min(1).max(1000),
 });
 
-export type WebhookConfig = {
-  appSecret: string;
+export type WebhookVerificationConfig = {
   verifyToken: string;
+};
+
+export type WebhookProcessingConfig = {
+  appSecret: string;
   accessToken: string;
   accountId: string;
   apiVersion: string;
@@ -34,13 +40,24 @@ export class ConfigurationError extends Error {
   }
 }
 
-export const getWebhookConfig = (): WebhookConfig => {
-  const parsed = webhookConfigSchema.safeParse(process.env);
+const invalidVariableNames = (error: z.ZodError) =>
+  Array.from(new Set(error.issues.map((issue) => issue.path.join("."))));
+
+export const getWebhookVerificationConfig = (): WebhookVerificationConfig => {
+  const parsed = webhookVerificationConfigSchema.safeParse(process.env);
 
   if (!parsed.success) {
-    throw new ConfigurationError(
-      parsed.error.issues.map((issue) => issue.path.join(".")),
-    );
+    throw new ConfigurationError(invalidVariableNames(parsed.error));
+  }
+
+  return { verifyToken: parsed.data.META_WEBHOOK_VERIFY_TOKEN };
+};
+
+export const getWebhookProcessingConfig = (): WebhookProcessingConfig => {
+  const parsed = webhookProcessingConfigSchema.safeParse(process.env);
+
+  if (!parsed.success) {
+    throw new ConfigurationError(invalidVariableNames(parsed.error));
   }
 
   const keywords = parseKeywords(parsed.data.INSTAGRAM_KEYWORDS);
@@ -50,7 +67,6 @@ export const getWebhookConfig = (): WebhookConfig => {
 
   return {
     appSecret: parsed.data.META_APP_SECRET,
-    verifyToken: parsed.data.META_WEBHOOK_VERIFY_TOKEN,
     accessToken: parsed.data.META_INSTAGRAM_ACCESS_TOKEN,
     accountId: parsed.data.META_INSTAGRAM_ACCOUNT_ID,
     apiVersion: parsed.data.META_GRAPH_API_VERSION,
@@ -59,28 +75,22 @@ export const getWebhookConfig = (): WebhookConfig => {
   };
 };
 
-const requiredRuntimeVariables = [
-  "META_APP_SECRET",
-  "META_WEBHOOK_VERIFY_TOKEN",
-  "META_INSTAGRAM_ACCESS_TOKEN",
-  "META_INSTAGRAM_ACCOUNT_ID",
-  "META_GRAPH_API_VERSION",
-  "INSTAGRAM_KEYWORDS",
-  "INSTAGRAM_PRIVATE_REPLY_TEXT",
-] as const;
-
 export const getSafeConfiguration = () => {
-  const missing = requiredRuntimeVariables.filter(
-    (name) => !process.env[name]?.trim(),
-  );
   const keywords = parseKeywords(process.env.INSTAGRAM_KEYWORDS ?? "");
-  const has = (name: (typeof requiredRuntimeVariables)[number]) =>
-    Boolean(process.env[name]?.trim());
-  const webhookReady =
-    has("META_APP_SECRET") &&
-    has("META_WEBHOOK_VERIFY_TOKEN") &&
-    has("META_INSTAGRAM_ACCOUNT_ID");
+  const verification = webhookVerificationConfigSchema.safeParse(process.env);
+  const processing = webhookProcessingConfigSchema.safeParse(process.env);
+  const invalid = new Set<string>([
+    ...(verification.success ? [] : invalidVariableNames(verification.error)),
+    ...(processing.success ? [] : invalidVariableNames(processing.error)),
+  ]);
+
+  if (keywords.length === 0) invalid.add("INSTAGRAM_KEYWORDS");
+
+  const has = (name: string) => Boolean(process.env[name]?.trim());
+  const webhookReady = verification.success;
+  const automationProcessingReady = processing.success && keywords.length > 0;
   const credentialsConfigured =
+    has("META_APP_SECRET") &&
     has("META_INSTAGRAM_ACCESS_TOKEN") &&
     has("META_INSTAGRAM_ACCOUNT_ID") &&
     has("META_GRAPH_API_VERSION");
@@ -88,11 +98,12 @@ export const getSafeConfiguration = () => {
     keywords.length > 0 && has("INSTAGRAM_PRIVATE_REPLY_TEXT");
 
   return {
-    configured: missing.length === 0 && keywords.length > 0,
-    missingCount: missing.length,
+    configured: webhookReady && automationProcessingReady,
+    missingCount: invalid.size,
     keywords,
     apiVersion: process.env.META_GRAPH_API_VERSION ?? null,
     webhookReady,
+    automationProcessingReady,
     credentialsConfigured,
     replyConfigured,
     dashboardProtected: Boolean(

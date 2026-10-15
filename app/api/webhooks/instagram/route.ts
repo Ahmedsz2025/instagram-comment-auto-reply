@@ -14,8 +14,9 @@ import {
 import { createKeywordMatcher } from "@/lib/matching";
 import {
   ConfigurationError,
-  getWebhookConfig,
-  type WebhookConfig,
+  getWebhookProcessingConfig,
+  getWebhookVerificationConfig,
+  type WebhookProcessingConfig,
 } from "@/lib/server/config";
 import { log } from "@/lib/server/logger";
 
@@ -33,28 +34,34 @@ const json = (body: Record<string, unknown>, status = 200) =>
   });
 
 export const GET = async (request: Request) => {
-  let config: WebhookConfig;
-  try {
-    config = getWebhookConfig();
-  } catch (error) {
-    log("error", "webhook.verification.configuration_error", {
-      missing:
-        error instanceof ConfigurationError ? error.missingOrInvalid : ["unknown"],
-    });
-    return new NextResponse("Server configuration error", { status: 503 });
-  }
-
   const url = new URL(request.url);
   const mode = url.searchParams.get("hub.mode");
   const challenge = url.searchParams.get("hub.challenge");
   const verifyToken = url.searchParams.get("hub.verify_token");
 
-  if (
-    mode === "subscribe" &&
-    challenge &&
-    verifyToken &&
-    secureStringEqual(verifyToken, config.verifyToken)
-  ) {
+  if (mode !== "subscribe" || !challenge || !verifyToken) {
+    log("warn", "webhook.verification.invalid_request");
+    return new NextResponse("Invalid verification request", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
+  let config;
+  try {
+    config = getWebhookVerificationConfig();
+  } catch (error) {
+    log("error", "webhook.verification.configuration_error", {
+      missing:
+        error instanceof ConfigurationError ? error.missingOrInvalid : ["unknown"],
+    });
+    return new NextResponse("Server configuration error", {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
+  if (secureStringEqual(verifyToken, config.verifyToken)) {
     log("info", "webhook.verification.accepted");
     return new NextResponse(challenge, {
       status: 200,
@@ -65,13 +72,16 @@ export const GET = async (request: Request) => {
     });
   }
 
-  log("warn", "webhook.verification.rejected", { mode });
-  return new NextResponse("Forbidden", { status: 403 });
+  log("warn", "webhook.verification.rejected");
+  return new NextResponse("Forbidden", {
+    status: 403,
+    headers: { "Cache-Control": "no-store" },
+  });
 };
 
 const processEvent = async (
   event: InstagramCommentEvent,
-  config: WebhookConfig,
+  config: WebhookProcessingConfig,
   requestId: string,
 ): Promise<EventOutcome> => {
   if (event.authorId === config.accountId) {
@@ -120,10 +130,10 @@ const processEvent = async (
 
 export const POST = async (request: Request) => {
   const requestId = crypto.randomUUID();
-  let config: WebhookConfig;
+  let config: WebhookProcessingConfig;
 
   try {
-    config = getWebhookConfig();
+    config = getWebhookProcessingConfig();
   } catch (error) {
     log("error", "webhook.configuration_error", {
       requestId,

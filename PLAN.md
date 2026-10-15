@@ -64,12 +64,15 @@ Meta comments webhook
        |
        v
 GET/POST /api/webhooks/instagram
-  1. verify the GET challenge or raw-body HMAC
-  2. validate and flatten comment changes
-  3. ignore unrelated accounts, fields, and self-comments
-  4. normalize text and match configured keywords
-  5. send a private reply through graph.instagram.com
-  6. emit a safe structured log and return a summary
+  GET: load only META_WEBHOOK_VERIFY_TOKEN and verify the challenge
+  POST:
+    1. load the separate automation-processing configuration
+    2. verify the raw-body HMAC with META_APP_SECRET
+    3. validate and flatten comment changes
+    4. ignore unrelated accounts, fields, and self-comments
+    5. normalize text and match configured keywords
+    6. send a private reply through graph.instagram.com
+    7. emit a safe structured log and return a summary
 
 Dashboard (server rendered)
   -> reads configuration presence only
@@ -82,6 +85,10 @@ Dashboard (server rendered)
 - Next.js App Router handles the dashboard and route handlers.
 - Server-only modules own environment validation, HMAC verification, webhook
   parsing, keyword matching, Meta HTTP calls, and structured logging.
+- Webhook verification configuration is intentionally independent: the GET
+  challenge requires only `META_WEBHOOK_VERIFY_TOKEN`. POST processing uses a
+  separate schema for the app secret, access token, account ID, API version,
+  keywords, and reply text.
 - The webhook handler operates entirely within the incoming request. It does not
   write the comment, user, result, or message ID anywhere.
 - The browser receives only booleans, the explicitly safe keyword list, and the
@@ -129,8 +136,8 @@ constraint when moving beyond the tutorial.
 - Emit one-line structured JSON logs with request/event IDs and status. Never
   log secrets, signatures, full request bodies, access tokens, comment text,
   usernames, account IDs, or private reply text.
-- The health endpoint reports configuration readiness only and never echoes a
-  secret value.
+- The health endpoint reports webhook-verification readiness and
+  automation-processing readiness separately and never echoes a secret value.
 
 ## Dashboard design direction
 
@@ -221,6 +228,8 @@ There is no `db/`, migration script, database module, or persistence dependency.
 
 - Unit-test Unicode/case-insensitive keyword boundaries and first-match order.
 - Unit-test valid, invalid, malformed, and missing webhook signatures.
+- Unit-test GET verification with only `META_WEBHOOK_VERIFY_TOKEN`, including
+  valid, mismatched, missing, and malformed verification parameters.
 - Unit-test comment payload extraction, batching, unrelated fields, and missing
   optional webhook properties.
 - Unit-test stateless event decisions, per-request duplicate filtering, and

@@ -7,13 +7,14 @@ export const dynamic = "force-dynamic";
 
 export const GET = async () => {
   const configuration = getSafeConfiguration();
-  const ready = configuration.configured;
+  const ready =
+    configuration.webhookReady && configuration.automationProcessingReady;
   return NextResponse.json(
     {
       status: ready ? "ready" : "not_ready",
       checks: {
-        webhook: configuration.webhookReady,
-        automation: configuration.configured,
+        webhookVerification: configuration.webhookReady,
+        automationProcessing: configuration.automationProcessingReady,
       },
       timestamp: new Date().toISOString(),
     },
